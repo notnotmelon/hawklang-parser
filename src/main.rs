@@ -86,7 +86,18 @@ impl Tokens {
             self.cursor += search_query.len();
             Ok(())
         } else {
-            self.syntax_error(format!("unexpected token: \"{}\"", search_query))
+            self.syntax_error(format!("Unexpected token: \"{}\"", search_query))
+        }
+    }
+
+    // consumes the next semicolon. errors and creates a critial error.
+    fn semicolon(&mut self) -> Result<(), SyntaxError> {
+        if self.peek(";") {
+            self.cursor += 1;
+            Ok(())
+        } else {
+            self.critical_error = self.syntax_error("Semicolon missing".to_string());
+            self.critical_error.clone()
         }
     }
 
@@ -181,7 +192,7 @@ impl Tokens {
         }
         self.stmt_sec()?;
         self.next("end")?;
-        self.next(";")?;
+        self.semicolon()?;
         Ok(())
     }
 
@@ -208,7 +219,7 @@ impl Tokens {
         self.id_list()?;
         self.next(":")?;
         self._type()?;
-        self.next(";")?;
+        self.semicolon()?;
         Ok(())
     }
 
@@ -327,7 +338,7 @@ impl Tokens {
         self.id()?;
         self.next(":=")?;
         self.expr()?;
-        self.next(";")?;
+        self.semicolon()?;
         Ok(())
     }
 
@@ -345,7 +356,7 @@ impl Tokens {
         }
         self.next("end")?;
         self.next("if")?;
-        self.next(";")?;
+        self.semicolon()?;
         Ok(())
     }
 
@@ -359,7 +370,7 @@ impl Tokens {
         self.stmt_sec()?;
         self.next("end")?;
         self.next("loop")?;
-        self.next(";")?;
+        self.semicolon()?;
         Ok(())
     }
 
@@ -369,7 +380,7 @@ impl Tokens {
         self.push("INPUT");
         self.next("input")?;
         self.id_list()?;
-        self.next(";")?;
+        self.semicolon()?;
         Ok(())
     }
 
@@ -380,12 +391,12 @@ impl Tokens {
         self.next("output")?;
         let state = self.save_state();
         if self.id_list().is_ok() {
-            self.next(";")?;
+            self.semicolon()?;
             return Ok(());
         }
         self.restore_state(state);
         self.num()?;
-        self.next(";")?;
+        self.semicolon()?;
         Ok(())
     }
 
