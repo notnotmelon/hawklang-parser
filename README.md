@@ -12,3 +12,7 @@ This is a recursive decent parser for the hawklang programming lanuage.
 ### GitHub
 
 https://github.com/notnotmelon/hawklang-parser
+
+### Example Output
+
+![image](https://github.com/user-attachments/assets/47572ab4-0da1-4f06-b293-c08742fbc279)
