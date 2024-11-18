@@ -9,7 +9,7 @@ fn main() {
     }
 
     let mut tokens = tokenize(documents_dir);
-    
+
     match tokens.program() {
         Ok(_) => (),
         Err(e) => eprintln!("{}", e),
@@ -45,13 +45,18 @@ impl Tokens {
         }
     }
 
+    fn debug(&self) {
+        let rest_of_input = self.tokens.get(self.cursor..).unwrap();
+        println!("rest of input: {}", rest_of_input);
+    }
+
     // consumes the next token. errors if the token does not match the search query.
     fn next(&mut self, search_query: &str) -> Result<(), SyntaxError> {
         if self.peek(search_query) {
             self.cursor += search_query.len();
             Ok(())
         } else {
-            self.syntax_error(format!("unexpected token: {}", search_query))
+            self.syntax_error(format!("unexpected token: \"{}\"", search_query))
         }
     }
 
@@ -59,8 +64,10 @@ impl Tokens {
     fn peek(&mut self, search_query: &str) -> bool {
         self.skip_whitespace(); // skip any whitespace before the token
 
-        let token = self.tokens.get(self.cursor..self.cursor + search_query.len());
-        
+        let token = self
+            .tokens
+            .get(self.cursor..self.cursor + search_query.len());
+
         match token {
             Some(token) => token == search_query,
             None => false,
@@ -129,7 +136,8 @@ impl Tokens {
             self.next("begin")?;
         }
         self.stmt_sec()?;
-        self.next("end;")?;
+        self.next("end")?;
+        self.next(";")?;
         Ok(())
     }
 
@@ -138,8 +146,10 @@ impl Tokens {
         println!("DECL_SEC");
         self.decl()?;
         let state = self.save_state();
-        let _ = self.decl_sec(); // if this errors, we have reached the end of the decl_sec. ignore the error.
-        self.restore_state(state);
+        if self.decl_sec().is_err() {
+            // if this errors, we have reached the end of the decl_sec. ignore the error.
+            self.restore_state(state);
+        }
         Ok(())
     }
 
@@ -187,6 +197,25 @@ impl Tokens {
             return self.syntax_error("expected an identifier".to_string());
         }
 
+        if matches!(
+            identifier.as_str(),
+            "program"
+                | "begin"
+                | "end"
+                | "if"
+                | "then"
+                | "else"
+                | "while"
+                | "loop"
+                | "input"
+                | "output"
+                | "int"
+                | "float"
+                | "double"
+        ) {
+            return self.syntax_error(format!("{identifier} is a reserved keyword"));
+        }
+
         println!("identifier: \"{}\"", identifier);
 
         Ok(())
@@ -197,8 +226,10 @@ impl Tokens {
         println!("STMT_SEC");
         self.stmt()?;
         let state = self.save_state();
-        let _ = self.stmt_sec(); // if this errors, we have reached the end of the stmt_sec. ignore the error.
-        self.restore_state(state);
+        if self.stmt_sec().is_err() {
+            // if this errors, we have reached the end of the stmt_sec. ignore the error.
+            self.restore_state(state);
+        }
         Ok(())
     }
 
@@ -288,6 +319,7 @@ impl Tokens {
         self.next("output")?;
         let state = self.save_state();
         if self.id_list().is_ok() {
+            self.next(";")?;
             return Ok(());
         }
         self.restore_state(state);
@@ -300,7 +332,12 @@ impl Tokens {
     fn expr(&mut self) -> Result<(), SyntaxError> {
         println!("EXPR");
         self.factor()?;
-        if self.peek("+") || self.peek("-") {
+        self.debug();
+        if self.peek("+") {
+            self.next("+")?;
+            self.expr()?;
+        } else if self.peek("-") {
+            self.next("-")?;
             self.expr()?;
         }
         Ok(())
@@ -310,7 +347,11 @@ impl Tokens {
     fn factor(&mut self) -> Result<(), SyntaxError> {
         println!("FACTOR");
         self.operand()?;
-        if self.peek("*") || self.peek("/") {
+        if self.peek("*") {
+            self.next("*")?;
+            self.factor()?;
+        } else if self.peek("/") {
+            self.next("/")?;
             self.factor()?;
         }
         Ok(())
@@ -343,8 +384,8 @@ impl Tokens {
 
         self.skip_whitespace();
         for c in self.tokens.chars().skip(self.cursor) {
-            seen_any = true;
             if c.is_ascii_digit() {
+                seen_any = true;
                 self.cursor += 1;
             } else if c == '.' {
                 if decimel {
@@ -369,7 +410,23 @@ impl Tokens {
         println!("COMP");
         self.next("(")?;
         self.operand()?;
-        if self.peek("=") || self.peek("<>") || self.peek(">") || self.peek("<") {
+        if self.peek("=") {
+            self.next("=")?;
+            self.operand()?;
+            self.next(")")?;
+            Ok(())
+        } else if self.peek("<>") {
+            self.next("<>")?;
+            self.operand()?;
+            self.next(")")?;
+            Ok(())
+        } else if self.peek(">") {
+            self.next(">")?;
+            self.operand()?;
+            self.next(")")?;
+            Ok(())
+        } else if self.peek("<") {
+            self.next("<")?;
             self.operand()?;
             self.next(")")?;
             Ok(())
@@ -381,10 +438,16 @@ impl Tokens {
     // Rule 18: TYPE -> int | float | double
     fn _type(&mut self) -> Result<(), SyntaxError> {
         println!("TYPE");
-        if self.peek("int") || self.peek("float") || self.peek("double") {
-            Ok(())
+        if self.peek("int") {
+            Ok(self.next("int")?)
+        } else if self.peek("float") {
+            Ok(self.next("float")?)
+        } else if self.peek("double") {
+            Ok(self.next("double")?)
         } else {
-            self.syntax_error("all declarations must have a type of int, float, or double".to_string())
+            self.syntax_error(
+                "all declarations must have a type of int, float, or double".to_string(),
+            )
         }
     }
 }
