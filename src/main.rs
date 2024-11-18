@@ -11,7 +11,11 @@ fn main() {
     let mut tokens = tokenize(documents_dir);
 
     match tokens.program() {
-        Ok(_) => (),
+        Ok(_) => {
+            for output in tokens.outputs {
+                println!("{}", output);
+            }
+        }
         Err(e) => eprintln!("{}", e),
     }
 }
@@ -20,6 +24,7 @@ struct Tokens {
     tokens: String,
     cursor: usize,
     line_number: usize,
+    outputs: Vec<&'static str>,
 }
 
 impl Tokens {
@@ -28,6 +33,7 @@ impl Tokens {
             tokens,
             cursor: 0,
             line_number: 0,
+            outputs: Vec::new(),
         }
     }
 
@@ -45,9 +51,10 @@ impl Tokens {
         }
     }
 
+    #[allow(dead_code)]
     fn debug(&self) {
         let rest_of_input = self.tokens.get(self.cursor..).unwrap();
-        println!("rest of input: {}", rest_of_input);
+        println!("{}", rest_of_input);
     }
 
     // consumes the next token. errors if the token does not match the search query.
@@ -78,16 +85,22 @@ impl Tokens {
         Err(SyntaxError::new(message, self.line_number))
     }
 
+    fn push(&mut self, output: &'static str) {
+        self.outputs.push(output);
+    }
+
     fn save_state(&self) -> TokensState {
         TokensState {
             cursor: self.cursor,
             line_number: self.line_number,
+            outputs: self.outputs.clone(),
         }
     }
 
     fn restore_state(&mut self, state: TokensState) {
         self.cursor = state.cursor;
         self.line_number = state.line_number;
+        self.outputs = state.outputs;
     }
 }
 
@@ -122,12 +135,13 @@ impl Error for SyntaxError {}
 struct TokensState {
     cursor: usize,
     line_number: usize,
+    outputs: Vec<&'static str>,
 }
 
 impl Tokens {
     // Rule 01: PROGRAM -> program DECL_SEC begin STMT_SEC end; | program begin STMT_SEC end;
     fn program(&mut self) -> Result<(), SyntaxError> {
-        println!("PROGRAM");
+        self.push("PROGRAM");
         self.next("program")?;
         if self.peek("begin") {
             self.next("begin")?;
@@ -143,7 +157,7 @@ impl Tokens {
 
     // Rule 02: DECL_SEC -> DECL | DECL DECL_SEC
     fn decl_sec(&mut self) -> Result<(), SyntaxError> {
-        println!("DECL_SEC");
+        self.push("DECL_SEC");
         self.decl()?;
         let state = self.save_state();
         if self.decl_sec().is_err() {
@@ -155,7 +169,7 @@ impl Tokens {
 
     // Rule 03: DECL -> ID_LIST : TYPE ;
     fn decl(&mut self) -> Result<(), SyntaxError> {
-        println!("DECL");
+        self.push("DECL");
         self.id_list()?;
         self.next(":")?;
         self._type()?;
@@ -165,7 +179,7 @@ impl Tokens {
 
     // Rule 04: ID_LIST -> ID | ID , ID_LIST
     fn id_list(&mut self) -> Result<(), SyntaxError> {
-        println!("ID_LIST");
+        self.push("ID_LIST");
         self.id()?;
         if self.peek(",") {
             self.next(",")?;
@@ -176,7 +190,6 @@ impl Tokens {
 
     // Rule 05: ID -> (_ | a | b | ... | z | A | ... | Z) (_ | a | b | ... | z | A | ... | Z | 0 | 1 | ... | 9)*
     fn id(&mut self) -> Result<(), SyntaxError> {
-        println!("ID");
         self.skip_whitespace();
         let mut identifier = String::new();
         let mut first_char = true;
@@ -216,14 +229,12 @@ impl Tokens {
             return self.syntax_error(format!("{identifier} is a reserved keyword"));
         }
 
-        println!("identifier: \"{}\"", identifier);
-
         Ok(())
     }
 
     // Rule 06: STMT_SEC -> STMT | STMT STMT_SEC
     fn stmt_sec(&mut self) -> Result<(), SyntaxError> {
-        println!("STMT_SEC");
+        self.push("STMT_SEC");
         self.stmt()?;
         let state = self.save_state();
         if self.stmt_sec().is_err() {
@@ -235,7 +246,7 @@ impl Tokens {
 
     // Rule 07: STMT -> ASSIGN | IFSTMT | WHILESTMT | INPUT | OUTPUT
     fn stmt(&mut self) -> Result<(), SyntaxError> {
-        println!("STMT");
+        self.push("STMT");
         let state = self.save_state();
         if self.assign().is_ok() {
             return Ok(());
@@ -266,7 +277,7 @@ impl Tokens {
 
     // Rule 08: ASSIGN -> ID := EXPR ;
     fn assign(&mut self) -> Result<(), SyntaxError> {
-        println!("ASSIGN");
+        self.push("ASSIGN");
         self.id()?;
         self.next(":=")?;
         self.expr()?;
@@ -276,7 +287,7 @@ impl Tokens {
 
     // Rule 09: IFSTMT -> if COMP then STMT_SEC end if ; | if COMP then STMT_SEC else STMT_SEC end if ;
     fn if_stmt(&mut self) -> Result<(), SyntaxError> {
-        println!("IFSTMT");
+        self.push("IF_STMT");
         self.next("if")?;
         self.comp()?;
         self.next("then")?;
@@ -293,7 +304,7 @@ impl Tokens {
 
     // Rule 10: WHILESTMT -> while COMP loop STMT_SEC end loop ;
     fn while_stmt(&mut self) -> Result<(), SyntaxError> {
-        println!("WHILESTMT");
+        self.push("WHILE_STMT");
         self.next("while")?;
         self.comp()?;
         self.next("loop")?;
@@ -306,7 +317,7 @@ impl Tokens {
 
     // Rule 11: INPUT -> input ID_LIST;
     fn input(&mut self) -> Result<(), SyntaxError> {
-        println!("INPUT");
+        self.push("INPUT");
         self.next("input")?;
         self.id_list()?;
         self.next(";")?;
@@ -315,7 +326,7 @@ impl Tokens {
 
     // Rule 12: OUTPUT -> output ID_LIST | output NUM;
     fn output(&mut self) -> Result<(), SyntaxError> {
-        println!("OUTPUT");
+        self.push("OUTPUT");
         self.next("output")?;
         let state = self.save_state();
         if self.id_list().is_ok() {
@@ -330,9 +341,8 @@ impl Tokens {
 
     // Rule 13: EXPR -> FACTOR | FACTOR + EXPR | FACTOR - EXPR
     fn expr(&mut self) -> Result<(), SyntaxError> {
-        println!("EXPR");
+        self.push("EXPR");
         self.factor()?;
-        self.debug();
         if self.peek("+") {
             self.next("+")?;
             self.expr()?;
@@ -345,7 +355,7 @@ impl Tokens {
 
     // Rule 14: FACTOR -> OPERAND | OPERAND * FACTOR | OPERAND / FACTOR
     fn factor(&mut self) -> Result<(), SyntaxError> {
-        println!("FACTOR");
+        self.push("FACTOR");
         self.operand()?;
         if self.peek("*") {
             self.next("*")?;
@@ -359,7 +369,7 @@ impl Tokens {
 
     // Rule 15: OPERAND -> NUM | ID | ( EXPR )
     fn operand(&mut self) -> Result<(), SyntaxError> {
-        println!("OPERAND");
+        self.push("OPERAND");
         let state = self.save_state();
         if self.num().is_ok() {
             return Ok(());
@@ -378,7 +388,6 @@ impl Tokens {
 
     // Rule 16: NUM -> (0 | 1 | ... | 9)+ [.(0 | 1 | ... | 9)+]
     fn num(&mut self) -> Result<(), SyntaxError> {
-        println!("NUM");
         let mut decimel = false;
         let mut seen_any = false;
 
@@ -407,7 +416,7 @@ impl Tokens {
 
     // Rule 17: COMP -> ( OPERAND = OPERAND ) | ( OPERAND <> OPERAND ) | ( OPERAND > OPERAND ) | ( OPERAND < OPERAND )
     fn comp(&mut self) -> Result<(), SyntaxError> {
-        println!("COMP");
+        self.push("COMP");
         self.next("(")?;
         self.operand()?;
         if self.peek("=") {
@@ -437,7 +446,6 @@ impl Tokens {
 
     // Rule 18: TYPE -> int | float | double
     fn _type(&mut self) -> Result<(), SyntaxError> {
-        println!("TYPE");
         if self.peek("int") {
             Ok(self.next("int")?)
         } else if self.peek("float") {
