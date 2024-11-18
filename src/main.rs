@@ -119,6 +119,10 @@ impl Tokens {
     }
 
     fn restore_state(&mut self, state: Self) {
+        if self.critical_error.is_err() {
+            return;
+        }
+
         self.cursor = state.cursor;
         self.line_number = state.line_number;
         self.outputs = state.outputs;
@@ -153,6 +157,7 @@ impl Error for SyntaxError {}
 impl Tokens {
     // Rule 01: PROGRAM -> program DECL_SEC begin STMT_SEC end; | program begin STMT_SEC end;
     fn program(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("PROGRAM");
         self.next("program")?;
         if self.peek("begin") {
@@ -185,6 +190,7 @@ impl Tokens {
 
     // Rule 03: DECL -> ID_LIST : TYPE ;
     fn decl(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("DECL");
         self.id_list()?;
         self.next(":")?;
@@ -195,6 +201,7 @@ impl Tokens {
 
     // Rule 04: ID_LIST -> ID | ID , ID_LIST
     fn id_list(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("ID_LIST");
         self.id()?;
         if self.peek(",") {
@@ -257,6 +264,7 @@ impl Tokens {
 
     // Rule 06: STMT_SEC -> STMT | STMT STMT_SEC
     fn stmt_sec(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("STMT_SEC");
         self.stmt()?;
         let state = self.save_state();
@@ -269,6 +277,7 @@ impl Tokens {
 
     // Rule 07: STMT -> ASSIGN | IFSTMT | WHILESTMT | INPUT | OUTPUT
     fn stmt(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("STMT");
         let state = self.save_state();
         if self.assign().is_ok() {
@@ -300,6 +309,7 @@ impl Tokens {
 
     // Rule 08: ASSIGN -> ID := EXPR ;
     fn assign(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("ASSIGN");
         self.id()?;
         self.next(":=")?;
@@ -310,6 +320,7 @@ impl Tokens {
 
     // Rule 09: IFSTMT -> if COMP then STMT_SEC end if ; | if COMP then STMT_SEC else STMT_SEC end if ;
     fn if_stmt(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("IF_STMT");
         self.next("if")?;
         self.comp()?;
@@ -327,6 +338,7 @@ impl Tokens {
 
     // Rule 10: WHILESTMT -> while COMP loop STMT_SEC end loop ;
     fn while_stmt(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("WHILE_STMT");
         self.next("while")?;
         self.comp()?;
@@ -340,6 +352,7 @@ impl Tokens {
 
     // Rule 11: INPUT -> input ID_LIST;
     fn input(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("INPUT");
         self.next("input")?;
         self.id_list()?;
@@ -349,6 +362,7 @@ impl Tokens {
 
     // Rule 12: OUTPUT -> output ID_LIST | output NUM;
     fn output(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("OUTPUT");
         self.next("output")?;
         let state = self.save_state();
@@ -364,6 +378,7 @@ impl Tokens {
 
     // Rule 13: EXPR -> FACTOR | FACTOR + EXPR | FACTOR - EXPR
     fn expr(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("EXPR");
         self.factor()?;
         if self.peek("+") {
@@ -378,6 +393,7 @@ impl Tokens {
 
     // Rule 14: FACTOR -> OPERAND | OPERAND * FACTOR | OPERAND / FACTOR
     fn factor(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("FACTOR");
         self.operand()?;
         if self.peek("*") {
@@ -392,6 +408,7 @@ impl Tokens {
 
     // Rule 15: OPERAND -> NUM | ID | ( EXPR )
     fn operand(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("OPERAND");
         let state = self.save_state();
         if self.num().is_ok() {
@@ -439,6 +456,7 @@ impl Tokens {
 
     // Rule 17: COMP -> ( OPERAND = OPERAND ) | ( OPERAND <> OPERAND ) | ( OPERAND > OPERAND ) | ( OPERAND < OPERAND )
     fn comp(&mut self) -> Result<(), SyntaxError> {
+        self.check_consisitency()?;
         self.push("COMP");
         self.next("(")?;
         self.operand()?;
