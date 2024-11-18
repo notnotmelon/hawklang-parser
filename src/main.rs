@@ -1,356 +1,390 @@
 use std::{error::Error, fmt::Display, path::PathBuf};
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let documents_dir = get_documents_dir();
+fn main() {
+    let documents_dir = dirs::document_dir().unwrap();
     let documents_dir = documents_dir.join("input.hawk");
+
+    fn tokenize(file_path: PathBuf) -> Tokens {
+        Tokens::new(std::fs::read_to_string(file_path).unwrap())
+    }
+
     let mut tokens = tokenize(documents_dir);
-    tokens.program()?;
-
-    Ok(())
-}
-
-fn get_documents_dir() -> PathBuf {
-    dirs::document_dir().unwrap()
+    
+    match tokens.program() {
+        Ok(_) => (),
+        Err(e) => eprintln!("{}", e),
+    }
 }
 
 struct Tokens {
     tokens: String,
-    cursor: isize,
+    cursor: usize,
+    line_number: usize,
 }
 
 impl Tokens {
-    fn new(tokens: String, cursor: isize) -> Tokens {
-        Tokens { tokens, cursor }
+    fn new(tokens: String) -> Tokens {
+        Tokens {
+            tokens,
+            cursor: 0,
+            line_number: 0,
+        }
     }
 
-    fn next(&mut self) -> Result<&str, SyntaxError> {
-        let next = &self.tokens.get(self.cursor as usize);
-        self.cursor += 1;
-        match next {
-            Some(token) => Ok(token),
-            None => {
-                let err = SyntaxError::new("unexpected end of file");
-                Err(err)
+    // skips whitespace and advances the line number.
+    fn skip_whitespace(&mut self) {
+        for c in self.tokens.chars().skip(self.cursor) {
+            if c == '\n' {
+                self.line_number += 1;
+                self.cursor += 1;
+            } else if c.is_whitespace() {
+                self.cursor += 1;
+            } else {
+                break;
             }
         }
     }
 
-    fn peek(&self) -> Result<&str, SyntaxError> {
-        match &self.tokens.get(self.cursor as usize) {
-            Some(token) => Ok(token),
-            None => {
-                let err = SyntaxError::new("unexpected end of file");
-                Err(err)
-            }
+    // consumes the next token. errors if the token does not match the search query.
+    fn next(&mut self, search_query: &str) -> Result<(), SyntaxError> {
+        if self.peek(search_query) {
+            self.cursor += search_query.len();
+            Ok(())
+        } else {
+            self.syntax_error(format!("unexpected token: {}", search_query))
         }
+    }
+
+    // previews the next token matches the search query without consuming it.
+    fn peek(&mut self, search_query: &str) -> bool {
+        self.skip_whitespace(); // skip any whitespace before the token
+
+        let token = self.tokens.get(self.cursor..self.cursor + search_query.len());
+        
+        match token {
+            Some(token) => token == search_query,
+            None => false,
+        }
+    }
+
+    fn syntax_error(&self, message: String) -> Result<(), SyntaxError> {
+        Err(SyntaxError::new(message, self.line_number))
+    }
+
+    fn save_state(&self) -> TokensState {
+        TokensState {
+            cursor: self.cursor,
+            line_number: self.line_number,
+        }
+    }
+
+    fn restore_state(&mut self, state: TokensState) {
+        self.cursor = state.cursor;
+        self.line_number = state.line_number;
     }
 }
 
 #[derive(Debug)]
 struct SyntaxError {
-    message: &'static str,
+    message: String,
+    line_number: usize,
 }
 
 impl SyntaxError {
-    fn new(message: &'static str) -> SyntaxError {
-        SyntaxError { message }
+    fn new(message: String, line_number: usize) -> SyntaxError {
+        SyntaxError {
+            message,
+            line_number,
+        }
     }
 }
 
 impl Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Syntax Error: {}", self.message)
+        write!(
+            f,
+            "Syntax Error: {} at line number {}.",
+            self.message, self.line_number
+        )
     }
 }
 
 impl Error for SyntaxError {}
 
+#[derive(Debug)]
+struct TokensState {
+    cursor: usize,
+    line_number: usize,
+}
+
 impl Tokens {
+    // Rule 01: PROGRAM -> program DECL_SEC begin STMT_SEC end; | program begin STMT_SEC end;
     fn program(&mut self) -> Result<(), SyntaxError> {
         println!("PROGRAM");
-        if self.next()? != "program" {
-            let err = SyntaxError::new("all programs must start with the program keyword");
-            return Err(err);
-        }
-
-        if self.peek()? == "begin" {
-            self.next()?;
+        self.next("program")?;
+        if self.peek("begin") {
+            self.next("begin")?;
         } else {
             self.decl_sec()?;
-            if self.next()? != "begin" {
-                let err = SyntaxError::new("all programs must start with the begin keyword");
-                return Err(err);
-            }
+            self.next("begin")?;
         }
-
         self.stmt_sec()?;
-        
-        if self.next()? != "end;" {
-            let err = SyntaxError::new("all programs must end with the end; keyword");
-            return Err(err);
-        }
-
+        self.next("end;")?;
         Ok(())
     }
 
+    // Rule 02: DECL_SEC -> DECL | DECL DECL_SEC
     fn decl_sec(&mut self) -> Result<(), SyntaxError> {
         println!("DECL_SEC");
         self.decl()?;
+        let state = self.save_state();
         let _ = self.decl_sec(); // if this errors, we have reached the end of the decl_sec. ignore the error.
+        self.restore_state(state);
         Ok(())
     }
 
+    // Rule 03: DECL -> ID_LIST : TYPE ;
     fn decl(&mut self) -> Result<(), SyntaxError> {
         println!("DECL");
         self.id_list()?;
-        if self.next()? != ":" {
-            let err = SyntaxError::new("all declarations must end with a colon");
-            return Err(err);
-        }
+        self.next(":")?;
         self._type()?;
-        if self.next()? != ";" {
-            let err = SyntaxError::new("all declarations must end with a semicolon");
-            return Err(err);
-        }
+        self.next(";")?;
         Ok(())
     }
 
+    // Rule 04: ID_LIST -> ID | ID , ID_LIST
     fn id_list(&mut self) -> Result<(), SyntaxError> {
         println!("ID_LIST");
         self.id()?;
-        if self.peek()? == "," {
-            self.next()?;
+        if self.peek(",") {
+            self.next(",")?;
             self.id_list()?;
         }
         Ok(())
     }
 
+    // Rule 05: ID -> (_ | a | b | ... | z | A | ... | Z) (_ | a | b | ... | z | A | ... | Z | 0 | 1 | ... | 9)*
     fn id(&mut self) -> Result<(), SyntaxError> {
         println!("ID");
-        let identifier = self.next()?;
-        println!("{identifier}");
-        let first_letter = match identifier.chars().next() {
-            Some(c) => c,
-            None => {
-                let err = SyntaxError::new("identifiers must have at least one character");
-                return Err(err);
-            }
-        };
-        if !first_letter.is_alphabetic() && first_letter != '_' {
-            let err = SyntaxError::new("identifiers must start with a letter or underscore");
-            return Err(err);
-        }
-        for c in identifier.chars().skip(1) {
-            if !c.is_alphanumeric() && c != '_' {
-                let err = SyntaxError::new("identifiers must only contain alphanumeric characters and underscores");
-                return Err(err);
+        self.skip_whitespace();
+        let mut identifier = String::new();
+        let mut first_char = true;
+        for c in self.tokens.chars().skip(self.cursor) {
+            if c.is_alphabetic() || c == '_' {
+                self.cursor += 1;
+                identifier.push(c);
+                first_char = false;
+            } else if c.is_ascii_digit() && !first_char {
+                self.cursor += 1;
+                identifier.push(c);
+            } else {
+                break;
             }
         }
+
+        if first_char {
+            return self.syntax_error("expected an identifier".to_string());
+        }
+
+        println!("identifier: \"{}\"", identifier);
+
         Ok(())
     }
 
-    fn _type(&mut self) -> Result<(), SyntaxError> {
-        println!("TYPE");
-        match self.next()? {
-            "int" | "float" | "double" => Ok(()),
-            _ => {
-                let err = SyntaxError::new("all declarations must have a type of int, float, or double");
-                Err(err)
-            }
-        }
-    }
-
+    // Rule 06: STMT_SEC -> STMT | STMT STMT_SEC
     fn stmt_sec(&mut self) -> Result<(), SyntaxError> {
         println!("STMT_SEC");
-        if self.assign().is_ok() { return Ok(()); }
-        if self.if_stmt().is_ok() { return Ok(()); }
-        if self.while_stmt().is_ok() { return Ok(()); }
-        if self.input().is_ok() { return Ok(()); }
-        if self.output().is_ok() { return Ok(()); }
-        let err = SyntaxError::new("expected a statement");
-        Err(err)
+        self.stmt()?;
+        let state = self.save_state();
+        let _ = self.stmt_sec(); // if this errors, we have reached the end of the stmt_sec. ignore the error.
+        self.restore_state(state);
+        Ok(())
     }
 
+    // Rule 07: STMT -> ASSIGN | IFSTMT | WHILESTMT | INPUT | OUTPUT
+    fn stmt(&mut self) -> Result<(), SyntaxError> {
+        println!("STMT");
+        let state = self.save_state();
+        if self.assign().is_ok() {
+            return Ok(());
+        }
+        self.restore_state(state);
+        let state = self.save_state();
+        if self.if_stmt().is_ok() {
+            return Ok(());
+        }
+        self.restore_state(state);
+        let state = self.save_state();
+        if self.while_stmt().is_ok() {
+            return Ok(());
+        }
+        self.restore_state(state);
+        let state = self.save_state();
+        if self.input().is_ok() {
+            return Ok(());
+        }
+        self.restore_state(state);
+        let state = self.save_state();
+        if self.output().is_ok() {
+            return Ok(());
+        }
+        self.restore_state(state);
+        self.syntax_error("expected a statement".to_string())
+    }
+
+    // Rule 08: ASSIGN -> ID := EXPR ;
     fn assign(&mut self) -> Result<(), SyntaxError> {
         println!("ASSIGN");
         self.id()?;
-        if self.next()? != ":=" {
-            let err = SyntaxError::new("all assignments must have a colon followed by an equal sign");
-            return Err(err);
-        }
+        self.next(":=")?;
         self.expr()?;
-        if self.next()? != ";" {
-            let err = SyntaxError::new("all assignments must end with a semicolon");
-            return Err(err);
-        }
+        self.next(";")?;
         Ok(())
     }
 
+    // Rule 09: IFSTMT -> if COMP then STMT_SEC end if ; | if COMP then STMT_SEC else STMT_SEC end if ;
     fn if_stmt(&mut self) -> Result<(), SyntaxError> {
         println!("IFSTMT");
-        if self.next()? != "if" {
-            let err = SyntaxError::new("all if statements must start with the if keyword");
-            return Err(err);
-        }
+        self.next("if")?;
         self.comp()?;
-        if self.next()? != "then" {
-            let err = SyntaxError::new("all if statements must start with the if keyword");
-            return Err(err);
-        }
+        self.next("then")?;
         self.stmt_sec()?;
-        if self.peek()? == "else" {
-            self.next()?;
+        if self.peek("else") {
+            self.next("else")?;
             self.stmt_sec()?;
         }
-        if self.next()? != "end" {
-            let err = SyntaxError::new("all if statements must end with the end keyword");
-            return Err(err);
-        }
-        if self.peek()? == "if;" {
-            self.next()?;
-            return Ok(())
-        }
-        if self.next()? != "if" {
-            let err = SyntaxError::new("all if statements must end with the if keyword");
-            return Err(err);
-        }
+        self.next("end")?;
+        self.next("if")?;
+        self.next(";")?;
         Ok(())
     }
 
+    // Rule 10: WHILESTMT -> while COMP loop STMT_SEC end loop ;
     fn while_stmt(&mut self) -> Result<(), SyntaxError> {
         println!("WHILESTMT");
-        if self.next()? != "while" {
-            let err = SyntaxError::new("all while statements must start with the while keyword");
-            return Err(err);
-        }
+        self.next("while")?;
         self.comp()?;
-        if self.next()? != "loop" {
-            let err = SyntaxError::new("all loop statements must start with the loop keyword");
-            return Err(err);
-        }
+        self.next("loop")?;
         self.stmt_sec()?;
-        if self.next()? != "end" {
-            let err = SyntaxError::new("all while statements must end with the end keyword");
-            return Err(err);
-        }
-        if self.peek()? == "loop;" {
-            self.next()?;
-            return Ok(())
-        }
-        if self.next()? != "loop" {
-            let err = SyntaxError::new("all loop statements must end with the loop keyword");
-            return Err(err);
-        }
-        if self.next()? != ";" {
-            let err = SyntaxError::new("all loop statements must end with a semicolon");
-            return Err(err);
-        }
+        self.next("end")?;
+        self.next("loop")?;
+        self.next(";")?;
         Ok(())
     }
 
-    fn comp(&mut self) -> Result<(), SyntaxError> {
-        println!("COMP");
-        if self.next()? != "(" {
-            let err = SyntaxError::new("expected an operand");
-            return Err(err);
-        }
-        self.operand()?;
-        match self.next()? {
-            "=" | "<>" | ">" | "<" => (),
-            _ => {
-                let err = SyntaxError::new("expected a comparison operator");
-                return Err(err);
-            }
-        }
-        self.operand()?;
-        if self.next()? != ")" {
-            let err = SyntaxError::new("expected a closing parenthesis");
-            return Err(err);
-        }
-        Ok(())
-    }
-
+    // Rule 11: INPUT -> input ID_LIST;
     fn input(&mut self) -> Result<(), SyntaxError> {
         println!("INPUT");
-        if self.next()? != "input" {
-            let err = SyntaxError::new("all input statements must start with the input keyword");
-            return Err(err);
-        }
+        self.next("input")?;
         self.id_list()?;
-        if self.next()? != ";" {
-            let err = SyntaxError::new("all input statements must end with a semicolon");
-            return Err(err);
-        }
+        self.next(";")?;
         Ok(())
     }
 
+    // Rule 12: OUTPUT -> output ID_LIST | output NUM;
     fn output(&mut self) -> Result<(), SyntaxError> {
         println!("OUTPUT");
-        if self.next()? != "output" {
-            let err = SyntaxError::new("all output statements must start with the output keyword");
-            return Err(err);
+        self.next("output")?;
+        let state = self.save_state();
+        if self.id_list().is_ok() {
+            return Ok(());
         }
-        if self.id_list().is_ok() { return Ok(()); }
+        self.restore_state(state);
         self.num()?;
-        if self.next()? != ";" {
-            let err = SyntaxError::new("all output statements must end with a semicolon");
-            return Err(err);
-        }
+        self.next(";")?;
         Ok(())
     }
 
+    // Rule 13: EXPR -> FACTOR | FACTOR + EXPR | FACTOR - EXPR
     fn expr(&mut self) -> Result<(), SyntaxError> {
         println!("EXPR");
         self.factor()?;
-        if let Ok(operator) = self.peek() {
-            if operator == "+" || operator == "-" {
-                self.next()?;
-                self.expr()?;
-            }
+        if self.peek("+") || self.peek("-") {
+            self.expr()?;
         }
         Ok(())
     }
 
+    // Rule 14: FACTOR -> OPERAND | OPERAND * FACTOR | OPERAND / FACTOR
     fn factor(&mut self) -> Result<(), SyntaxError> {
         println!("FACTOR");
         self.operand()?;
-        if let Ok(operator) = self.peek() {
-            if operator == "*" || operator == "/" {
-                self.next()?;
-                self.expr()?;
-            }
+        if self.peek("*") || self.peek("/") {
+            self.factor()?;
         }
         Ok(())
     }
 
+    // Rule 15: OPERAND -> NUM | ID | ( EXPR )
     fn operand(&mut self) -> Result<(), SyntaxError> {
         println!("OPERAND");
-        if self.num().is_ok() { return Ok(()); }
-        if self.id().is_ok() { return Ok(()); }
-        if self.next()? != "(" {
-            let err = SyntaxError::new("expected an operand");
-            return Err(err);
+        let state = self.save_state();
+        if self.num().is_ok() {
+            return Ok(());
         }
+        self.restore_state(state);
+        let state = self.save_state();
+        if self.id().is_ok() {
+            return Ok(());
+        }
+        self.restore_state(state);
+        self.next("(")?;
         self.expr()?;
-        if self.next()? != ")" {
-            let err = SyntaxError::new("expected a closing parenthesis");
-            return Err(err);
-        }
+        self.next(")")?;
         Ok(())
     }
 
+    // Rule 16: NUM -> (0 | 1 | ... | 9)+ [.(0 | 1 | ... | 9)+]
     fn num(&mut self) -> Result<(), SyntaxError> {
         println!("NUM");
-        let number = self.next()?;
-        if number.parse::<f64>().is_err() {
-            let err = SyntaxError::new("expected a number");
-            return Err(err);
+        let mut decimel = false;
+        let mut seen_any = false;
+
+        self.skip_whitespace();
+        for c in self.tokens.chars().skip(self.cursor) {
+            seen_any = true;
+            if c.is_ascii_digit() {
+                self.cursor += 1;
+            } else if c == '.' {
+                if decimel {
+                    break;
+                }
+                decimel = true;
+                seen_any = false;
+                self.cursor += 1;
+            } else {
+                break;
+            }
+        }
+
+        if !seen_any {
+            return self.syntax_error("expected a number".to_string());
         }
         Ok(())
     }
-}
 
-fn tokenize(file_path: PathBuf) -> Tokens {
-    let file_contents = std::fs::read_to_string(file_path).unwrap();
-    Tokens::new(file_contents, 0)
+    // Rule 17: COMP -> ( OPERAND = OPERAND ) | ( OPERAND <> OPERAND ) | ( OPERAND > OPERAND ) | ( OPERAND < OPERAND )
+    fn comp(&mut self) -> Result<(), SyntaxError> {
+        println!("COMP");
+        self.next("(")?;
+        self.operand()?;
+        if self.peek("=") || self.peek("<>") || self.peek(">") || self.peek("<") {
+            self.operand()?;
+            self.next(")")?;
+            Ok(())
+        } else {
+            self.syntax_error("expected a comparison operator".to_string())
+        }
+    }
+
+    // Rule 18: TYPE -> int | float | double
+    fn _type(&mut self) -> Result<(), SyntaxError> {
+        println!("TYPE");
+        if self.peek("int") || self.peek("float") || self.peek("double") {
+            Ok(())
+        } else {
+            self.syntax_error("all declarations must have a type of int, float, or double".to_string())
+        }
+    }
 }
