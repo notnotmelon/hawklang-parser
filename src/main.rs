@@ -1,14 +1,25 @@
-use std::{collections::HashMap, error::Error, fmt::Display, path::PathBuf};
+use std::{collections::HashMap, error::Error, fmt::Display, path::PathBuf, env};
 
-fn main() {
-    let documents_dir = dirs::document_dir().unwrap();
-    let documents_dir = documents_dir.join("input.hawk");
+fn get_input() -> Result<String, Box<dyn Error>> {
+    let input = match env::args().nth(1) {
+        Some(input) => input,
+        None => return Err("No input file provided".into()),
+    };
 
-    fn tokenize(file_path: PathBuf) -> Tokens {
-        Tokens::new(std::fs::read_to_string(file_path).unwrap())
-    }
+    let err_message = format!("Could not find file {input}");
+    let input_file = match PathBuf::from(input).canonicalize() {
+        Ok(input_file) => input_file,
+        Err(_) => return Err(err_message.into()),
+    };
 
-    let mut tokens = tokenize(documents_dir);
+    Ok(match std::fs::read_to_string(input_file) {
+        Ok(input_file) => input_file,
+        Err(_) => return Err(err_message.into()),
+    })
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let mut tokens = Tokens::new(get_input()?);
     let result = tokens.program();
 
     for output in &tokens.outputs {
@@ -22,6 +33,8 @@ fn main() {
         },
         Err(e) => eprintln!("{}", e),
     };
+
+    Ok(())
 }
 
 struct Tokens {
